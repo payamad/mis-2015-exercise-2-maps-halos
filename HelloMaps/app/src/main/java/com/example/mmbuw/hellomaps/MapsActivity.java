@@ -3,6 +3,7 @@ package com.example.mmbuw.hellomaps;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.location.Location;
 import android.location.LocationManager;
 import android.support.v4.app.FragmentActivity;
@@ -11,17 +12,27 @@ import android.widget.EditText;
 
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.SupportMapFragment;
+import com.google.android.gms.maps.model.CameraPosition;
+import com.google.android.gms.maps.model.Circle;
+import com.google.android.gms.maps.model.CircleOptions;
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.LatLngBounds;
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
 
-public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLongClickListener, GoogleMap.OnMarkerClickListener {
+import java.lang.reflect.Array;
+import java.util.ArrayList;
+import java.util.Arrays;
+
+public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLongClickListener, GoogleMap.OnMarkerClickListener, GoogleMap.OnCameraChangeListener {
 
     private GoogleMap mMap; // Might be null if Google Play services APK is not available.
     private LocationManager locationManager;
     private SharedPreferences sharedPref;
 
     private EditText editText;
+
+    private ArrayList<Circle>  circleList;
 
     private int markerCounter = 0;
 
@@ -36,6 +47,8 @@ public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLon
         sharedPref = this.getPreferences(Context.MODE_PRIVATE);
 
         editText = (EditText) findViewById(R.id.edittext);
+
+        circleList = new ArrayList<Circle>();
 
         setUpMapIfNeeded();
     }
@@ -97,6 +110,7 @@ public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLon
 
         mMap.setOnMapLongClickListener(this);
         mMap.setOnMarkerClickListener(this);
+        mMap.setOnCameraChangeListener(this);
     }
 
 
@@ -120,7 +134,95 @@ public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLon
         editor.putString(Integer.toString(markerCounter), value);
         editor.putString(markerCounter + "-LatLng", latLng.toString());
         editor.commit();
+
+        // Add new circle
+        addCircle(latLng);
         markerCounter++;
+    }
+
+    private void addCircle(LatLng latLng){
+        /**
+         * Add a circle for each marker
+         * The radius is zero because the marker is visible
+         */
+        Circle circle = mMap.addCircle(new CircleOptions()
+                .center(latLng)
+                .radius(0)
+                .strokeColor(Color.RED));
+        circleList.add(circle);
+    }
+
+    private void drawCircles(){
+        /**
+         * Found visible map boundaries
+         * Link -> http://stackoverflow.com/questions/14700498/android-google-maps-get-boundary-co-ordinates
+         */
+        LatLngBounds curScreen = mMap.getProjection().getVisibleRegion().latLngBounds;
+        Location boundCenter = new Location(String.valueOf(curScreen.getCenter()));
+        boundCenter.setLatitude(curScreen.getCenter().latitude);
+        boundCenter.setLongitude(curScreen.getCenter().longitude);
+
+        // Check each marker to find out, is it in the boundary or not?
+        // Also change circle radius if it is necessary
+        for(Circle circle: circleList){
+            Location circleCenter = new Location(String.valueOf(circle.getCenter()));
+            circleCenter.setLatitude(circle.getCenter().latitude);
+            circleCenter.setLongitude(circle.getCenter().longitude);
+
+            if(curScreen.contains(circle.getCenter())){
+                // If the marker is in the boundary make radius of its circle to zero
+                circle.setRadius(0);
+            } else {
+                // Find the nearest point on the boundary to the circle's center point
+                LatLng latlng = findClosestLocationInBoundary(curScreen, circle.getCenter());
+
+                Location pointLocation = new Location(String.valueOf(circle.getCenter()));
+                pointLocation.setLatitude(latlng.latitude);
+                pointLocation.setLongitude(latlng.longitude);
+
+                // Circle radius is equal to distance of circle center to the point that we just found plus to distance of the center of boundary to the point divided by 5
+                // We use distance to center divided by 5 to make circle visible in our view
+                circle.setRadius(circleCenter.distanceTo(pointLocation) + (boundCenter.distanceTo(pointLocation) / 5));
+            }
+        }
+
+    }
+
+    private LatLng findClosestLocationInBoundary(LatLngBounds bound, LatLng point)
+    {
+        double latitude = point.latitude;
+        double longitude = point.longitude;
+        LatLng boundCenter = bound.getCenter();
+
+        if(boundCenter.latitude < point.latitude){
+            if(boundCenter.longitude < point.longitude){
+                if(bound.northeast.latitude < point.latitude)
+                    latitude = bound.northeast.latitude;
+                if(bound.northeast.longitude < point.longitude)
+                    longitude = bound.northeast.longitude;
+
+            } else {
+                if(bound.northeast.latitude < point.latitude)
+                    latitude = bound.northeast.latitude;
+                if(bound.southwest.longitude > point.longitude)
+                    longitude = bound.southwest.longitude;
+
+
+            }
+        } else {
+            if(boundCenter.longitude > point.longitude){
+                if(bound.southwest.latitude > point.latitude)
+                    latitude = bound.southwest.latitude;
+                if(bound.southwest.longitude > point.longitude)
+                    longitude = bound.southwest.longitude;
+            } else {
+                if(bound.southwest.latitude > point.latitude)
+                    latitude = bound.southwest.latitude;
+                if(bound.northeast.longitude < point.longitude)
+                    longitude = bound.northeast.longitude;
+            }
+        }
+        return new LatLng(latitude,longitude);
     }
 
     @Override
@@ -139,5 +241,10 @@ public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLon
 
         alertDialog.show();
         return true;
+    }
+
+    @Override
+    public void onCameraChange(CameraPosition cameraPosition) {
+        drawCircles();
     }
 }
