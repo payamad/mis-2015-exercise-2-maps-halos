@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.location.Location;
 import android.location.LocationManager;
+import android.preference.PreferenceManager;
 import android.support.v4.app.FragmentActivity;
 import android.os.Bundle;
 import android.widget.EditText;
@@ -44,13 +45,33 @@ public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLon
         //setup location manager
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
 
-        sharedPref = this.getPreferences(Context.MODE_PRIVATE);
+        sharedPref = PreferenceManager.getDefaultSharedPreferences(this);
+
 
         editText = (EditText) findViewById(R.id.edittext);
 
         circleList = new ArrayList<Circle>();
 
         setUpMapIfNeeded();
+    }
+
+    @Override
+    public void onSaveInstanceState(Bundle savedInstanceState) {
+        super.onSaveInstanceState(savedInstanceState);
+        // Save the number of markers
+        savedInstanceState.putInt("MarkerCounter", markerCounter);
+    }
+
+    @Override
+    public void onRestoreInstanceState(Bundle savedInstanceState) {
+        super.onRestoreInstanceState(savedInstanceState);
+        // Restore number of markers
+        markerCounter = savedInstanceState.getInt("MarkerCounter");
+        if (mMap != null) {
+            // Redraw markers and circles
+            drawMarkers();
+            drawCircles();
+        }
     }
 
     @Override
@@ -99,18 +120,27 @@ public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLon
          * Source: http://stackoverflow.com/questions/2227292/how-to-get-latitude-and-longitude-of-the-mobiledevice-in-android
          *
          */
-        Location location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-        double longitude = location.getLongitude();
-        double latitude = location.getLatitude();
-        LatLng latLng = new LatLng(latitude, longitude);
-        mMap.addMarker(new MarkerOptions().position(latLng).title(Integer.toString(markerCounter)));
 
-        // Save marker information
-        setNewMarkerToPreferences("Marker", latLng);
+        if(markerCounter == 0){
+            // There is no previous markers, so add a marker with a current location
+            Location location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+            double longitude = location.getLongitude();
+            double latitude = location.getLatitude();
+            LatLng latLng = new LatLng(latitude, longitude);
+            mMap.addMarker(new MarkerOptions().position(latLng).title(Integer.toString(markerCounter)));
 
-        mMap.setOnMapLongClickListener(this);
-        mMap.setOnMarkerClickListener(this);
-        mMap.setOnCameraChangeListener(this);
+            // Save marker information
+            setNewMarkerToPreferences("Marker", latLng);
+
+            mMap.setOnMapLongClickListener(this);
+            mMap.setOnMarkerClickListener(this);
+            mMap.setOnCameraChangeListener(this);
+        } else {
+            // Redraw saved markers and circles
+            drawMarkers();
+            drawCircles();
+        }
+
     }
 
 
@@ -132,7 +162,8 @@ public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLon
          */
         SharedPreferences.Editor editor = sharedPref.edit();
         editor.putString(Integer.toString(markerCounter), value);
-        editor.putString(markerCounter + "-LatLng", latLng.toString());
+        editor.putString(markerCounter + "Lat", Double.toString(latLng.latitude));
+        editor.putString(markerCounter + "Lng", Double.toString(latLng.longitude));
         editor.commit();
 
         // Add new circle
@@ -150,6 +181,17 @@ public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLon
                 .radius(0)
                 .strokeColor(Color.RED));
         circleList.add(circle);
+    }
+
+    private void drawMarkers(){
+        for(int i=1; i < markerCounter; i++){
+            double latitude = Double.parseDouble(sharedPref.getString(i + "Lat",""));
+            double longitude = Double.parseDouble(sharedPref.getString(i + "Lng",""));
+            String message = sharedPref.getString(Integer.toString(i), "");
+            mMap.addMarker(new MarkerOptions().position(new LatLng(latitude, longitude)).title(Integer.toString(i)));
+            addCircle(new LatLng(latitude, longitude));
+
+        }
     }
 
     private void drawCircles(){
@@ -194,14 +236,17 @@ public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLon
         double longitude = point.longitude;
         LatLng boundCenter = bound.getCenter();
 
+        // The point is upper than center of boundary
         if(boundCenter.latitude < point.latitude){
+            // The point is in right half of the boundary
             if(boundCenter.longitude < point.longitude){
                 if(bound.northeast.latitude < point.latitude)
                     latitude = bound.northeast.latitude;
                 if(bound.northeast.longitude < point.longitude)
                     longitude = bound.northeast.longitude;
 
-            } else {
+            } else { // The point is in left half of the boundary
+
                 if(bound.northeast.latitude < point.latitude)
                     latitude = bound.northeast.latitude;
                 if(bound.southwest.longitude > point.longitude)
@@ -209,13 +254,16 @@ public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLon
 
 
             }
-        } else {
+        } else { // The point is lower than center of boundary
+
+            // The point is in left half of the boundary
             if(boundCenter.longitude > point.longitude){
                 if(bound.southwest.latitude > point.latitude)
                     latitude = bound.southwest.latitude;
                 if(bound.southwest.longitude > point.longitude)
                     longitude = bound.southwest.longitude;
-            } else {
+            } else { // The point is in left half of the boundary
+
                 if(bound.southwest.latitude > point.latitude)
                     latitude = bound.southwest.latitude;
                 if(bound.northeast.longitude < point.longitude)
@@ -234,7 +282,8 @@ public class MapsActivity extends FragmentActivity implements GoogleMap.OnMapLon
          */
         int markerId = Integer.parseInt(marker.getTitle().toString());
         String text = sharedPref.getString(Integer.toString(markerId),"") + "\n"
-                + sharedPref.getString(markerId + "-LatLng","");
+                + "Location:" + sharedPref.getString(markerId + "Lat","")
+                + "," + sharedPref.getString(markerId + "Lng","");
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setMessage(text);
         AlertDialog alertDialog = builder.create();
